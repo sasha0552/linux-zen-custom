@@ -1,32 +1,31 @@
-From 42dbb859bc0f85ffcbcde4e258a5a563c125d6bd Mon Sep 17 00:00:00 2001
+From 18938a10031a65cfafdf1cc3af4287bc5457dd7c Mon Sep 17 00:00:00 2001
 From: Djip007 <djip.perois@free.fr>
 Date: Tue, 7 May 2019 14:37:31 +0200
-Subject: [PATCH 2/3] add kernel message on kfd suspend/resume
+Subject: [PATCH 1/2] add kernel message on kfd suspend/resume
 
 ---
- drivers/gpu/drm/amd/amdkfd/kfd_device.c | 30 +++++++++++++++++++++----
- 1 file changed, 26 insertions(+), 4 deletions(-)
+ drivers/gpu/drm/amd/amdkfd/kfd_device.c | 29 ++++++++++++++++++++++---
+ 1 file changed, 26 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_device.c b/drivers/gpu/drm/amd/amdkfd/kfd_device.c
-index 4bfedaab183f..9385b27b979b 100644
+index 65a1d4f9004b..c141e94a475c 100644
 --- a/drivers/gpu/drm/amd/amdkfd/kfd_device.c
 +++ b/drivers/gpu/drm/amd/amdkfd/kfd_device.c
-@@ -527,6 +527,7 @@ static int kfd_gtt_sa_init(struct kfd_dev *kfd, unsigned int buf_size,
+@@ -59,6 +59,7 @@ static int kfd_gtt_sa_init(struct kfd_dev *kfd, unsigned int buf_size,
  				unsigned int chunk_size);
  static void kfd_gtt_sa_fini(struct kfd_dev *kfd);
  
 +static void kfd_suspend(struct kfd_dev *kfd);
  static int kfd_resume(struct kfd_dev *kfd);
  
- struct kfd_dev *kgd2kfd_probe(struct kgd_dev *kgd,
-@@ -790,8 +791,13 @@ bool kgd2kfd_device_init(struct kfd_dev *kfd,
+ static void kfd_device_info_set_sdma_info(struct kfd_dev *kfd)
+@@ -683,7 +684,13 @@ bool kgd2kfd_device_init(struct kfd_dev *kfd,
  
  void kgd2kfd_device_exit(struct kfd_dev *kfd)
  {
 +	dev_info(kfd_device, "exit device: %x:%x\n", kfd->pdev->vendor, kfd->pdev->device);
 +
  	if (kfd->init_complete) {
--		kgd2kfd_suspend(kfd, false);
 +		/* For first KFD device suspend all the KFD processes */
 +		if (atomic_inc_return(&kfd_locked) == 1)
 +			kfd_suspend_all_processes();
@@ -34,11 +33,13 @@ index 4bfedaab183f..9385b27b979b 100644
  		device_queue_manager_uninit(kfd->dqm);
  		kfd_interrupt_exit(kfd);
  		kfd_topology_remove_device(kfd);
-@@ -809,10 +815,15 @@ int kgd2kfd_pre_reset(struct kfd_dev *kfd)
+@@ -702,12 +709,17 @@ int kgd2kfd_pre_reset(struct kfd_dev *kfd)
  {
  	if (!kfd->init_complete)
  		return 0;
 +	dev_info(kfd_device, "pre reset device %x:%x\n", kfd->pdev->vendor, kfd->pdev->device);
+ 
+ 	kfd_smi_event_update_gpu_reset(kfd, false);
  
  	kfd->dqm->ops.pre_reset(kfd->dqm);
  
@@ -51,7 +52,7 @@ index 4bfedaab183f..9385b27b979b 100644
  
  	kfd_signal_reset_event(kfd);
  	return 0;
-@@ -830,6 +841,7 @@ int kgd2kfd_post_reset(struct kfd_dev *kfd)
+@@ -725,6 +737,7 @@ int kgd2kfd_post_reset(struct kfd_dev *kfd)
  
  	if (!kfd->init_complete)
  		return 0;
@@ -59,7 +60,7 @@ index 4bfedaab183f..9385b27b979b 100644
  
  	ret = kfd_resume(kfd);
  	if (ret)
-@@ -843,6 +855,9 @@ int kgd2kfd_post_reset(struct kfd_dev *kfd)
+@@ -740,6 +753,9 @@ int kgd2kfd_post_reset(struct kfd_dev *kfd)
  
  bool kfd_is_locked(void)
  {
@@ -69,7 +70,7 @@ index 4bfedaab183f..9385b27b979b 100644
  	return  (atomic_read(&kfd_locked) > 0);
  }
  
-@@ -850,6 +865,7 @@ void kgd2kfd_suspend(struct kfd_dev *kfd, bool run_pm)
+@@ -747,6 +763,7 @@ void kgd2kfd_suspend(struct kfd_dev *kfd, bool run_pm)
  {
  	if (!kfd->init_complete)
  		return;
@@ -77,7 +78,7 @@ index 4bfedaab183f..9385b27b979b 100644
  
  	/* for runtime suspend, skip locking kfd */
  	if (!run_pm) {
-@@ -858,8 +874,7 @@ void kgd2kfd_suspend(struct kfd_dev *kfd, bool run_pm)
+@@ -755,8 +772,7 @@ void kgd2kfd_suspend(struct kfd_dev *kfd, bool run_pm)
  			kfd_suspend_all_processes();
  	}
  
@@ -87,7 +88,7 @@ index 4bfedaab183f..9385b27b979b 100644
  }
  
  int kgd2kfd_resume(struct kfd_dev *kfd, bool run_pm)
-@@ -868,6 +883,7 @@ int kgd2kfd_resume(struct kfd_dev *kfd, bool run_pm)
+@@ -765,6 +781,7 @@ int kgd2kfd_resume(struct kfd_dev *kfd, bool run_pm)
  
  	if (!kfd->init_complete)
  		return 0;
@@ -95,8 +96,8 @@ index 4bfedaab183f..9385b27b979b 100644
  
  	ret = kfd_resume(kfd);
  	if (ret)
-@@ -884,6 +900,12 @@ int kgd2kfd_resume(struct kfd_dev *kfd, bool run_pm)
- 	return ret;
+@@ -793,6 +810,12 @@ int kgd2kfd_resume_iommu(struct kfd_dev *kfd)
+ 	return err;
  }
  
 +static void kfd_suspend(struct kfd_dev *kfd)
@@ -109,5 +110,5 @@ index 4bfedaab183f..9385b27b979b 100644
  {
  	int err = 0;
 -- 
-2.29.2
+2.25.1
 

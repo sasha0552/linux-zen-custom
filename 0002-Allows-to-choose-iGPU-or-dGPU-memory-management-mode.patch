@@ -1,19 +1,19 @@
-From b221d51c6a6e9d7fb306fe94980aeac4f05c56c9 Mon Sep 17 00:00:00 2001
+From 96409c66bd58489215b89c0797f122dc3df23ee6 Mon Sep 17 00:00:00 2001
 From: Djip_007 <djip.perois@free.fr>
 Date: Tue, 27 Aug 2019 21:57:29 +0200
-Subject: [PATCH 3/3] Allows to choose iGPU or dGPU memory management mode
+Subject: [PATCH 2/2] Allows to choose iGPU or dGPU memory management mode
 
 ---
- drivers/gpu/drm/amd/amdkfd/kfd_device.c   | 40 +++++++++++++++++++++++
+ drivers/gpu/drm/amd/amdkfd/kfd_device.c   | 43 +++++++++++++++++++++++
  drivers/gpu/drm/amd/amdkfd/kfd_priv.h     |  5 +++
- drivers/gpu/drm/amd/amdkfd/kfd_topology.c | 15 ++++++++-
- 3 files changed, 59 insertions(+), 1 deletion(-)
+ drivers/gpu/drm/amd/amdkfd/kfd_topology.c | 15 +++++++-
+ 3 files changed, 62 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_device.c b/drivers/gpu/drm/amd/amdkfd/kfd_device.c
-index 9385b27b979b..5eae5f89a7ce 100644
+index c141e94a475c..cd9c1bcca09f 100644
 --- a/drivers/gpu/drm/amd/amdkfd/kfd_device.c
 +++ b/drivers/gpu/drm/amd/amdkfd/kfd_device.c
-@@ -20,6 +20,7 @@
+@@ -21,6 +21,7 @@
   * OTHER DEALINGS IN THE SOFTWARE.
   */
  
@@ -21,9 +21,9 @@ index 9385b27b979b..5eae5f89a7ce 100644
  #include <linux/bsearch.h>
  #include <linux/pci.h>
  #include <linux/slab.h>
-@@ -523,6 +524,17 @@ static const struct kfd_device_info *kfd_supported_devices[][2] = {
- 	[CHIP_NAVY_FLOUNDER] = {&navy_flounder_device_info, &navy_flounder_device_info},
- };
+@@ -55,6 +56,17 @@ extern const struct kfd2kgd_calls gfx_v10_kfd2kgd;
+ extern const struct kfd2kgd_calls gfx_v10_3_kfd2kgd;
+ extern const struct kfd2kgd_calls gfx_v11_kfd2kgd;
  
 +/*
 + * now we can't mix iGPU (AMD APU) with dGPU...
@@ -39,46 +39,49 @@ index 9385b27b979b..5eae5f89a7ce 100644
  static int kfd_gtt_sa_init(struct kfd_dev *kfd, unsigned int buf_size,
  				unsigned int chunk_size);
  static void kfd_gtt_sa_fini(struct kfd_dev *kfd);
-@@ -546,6 +558,34 @@ struct kfd_dev *kgd2kfd_probe(struct kgd_dev *kgd,
- 	device_info = kfd_supported_devices[asic_type][vf];
- 	f2g = kfd2kgd_funcs[asic_type];
- 
-+	if (device_info) {
+@@ -433,6 +445,37 @@ struct kfd_dev *kgd2kfd_probe(struct amdgpu_device *adev, bool vf)
+ 	kfd->pdev = pdev;
+ 	kfd->init_complete = false;
+ 	kfd->kfd2kgd = f2g;
++
++	if (1) { // kfd->device_info
 +		// iGPU mode:
-+		if ((amdkfd_rocm_mode & ROCM_MODE_IGPU) 
-+            && (device_info->needs_iommu_device)) {
++		if ((amdkfd_rocm_mode & ROCM_MODE_IGPU)
++			&& (kfd->device_info.needs_iommu_device)) {
 +			// iGPU memory model request => do not add anymore dGPU
 +			amdkfd_rocm_mode = ROCM_MODE_IGPU;
 +		} else
 +		// dGPU mode:
 +		if ((amdkfd_rocm_mode &  ROCM_MODE_DGPU)
-+			&& (!device_info->needs_iommu_device)) {
++			&& (!kfd->device_info.needs_iommu_device)) {
 +			// dGPU memory model request => do not add anymore iGPU
 +			amdkfd_rocm_mode = ROCM_MODE_DGPU;
-+		} else 
++		} else
 +		// return for device not usable with current memory management models
 +		if (amdkfd_rocm_mode & ROCM_MODE_IGPU) {
 +			dev_warn(kfd_device,
 +				"skipped %s, don't support iGPU memory management models\n",
-+				amdgpu_asic_name[asic_type]);
++				amdgpu_asic_name[adev->asic_type]);
++			kfree(kfd);
 +			return NULL;
 +		} else
 +		if (amdkfd_rocm_mode & ROCM_MODE_DGPU) {
 +			dev_warn(kfd_device,
 +				"skipped %s, don't support dGPU memory management models\n",
-+				amdgpu_asic_name[asic_type]);
++				amdgpu_asic_name[adev->asic_type]);
++			kfree(kfd);
 +			return NULL;
 +		}
 +	}
 +
- 	if (!device_info || !f2g) {
- 		dev_err(kfd_device, "%s %s not supported in kfd\n",
- 			amdgpu_asic_name[asic_type], vf ? "VF" : "");
+ 	atomic_set(&kfd->compute_profile, 0);
+ 
+ 	mutex_init(&kfd->doorbell_mutex);
 diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_priv.h b/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
-index 6727e9de5b8b..df23591399f6 100644
+index bf610e3b683b..b2ee8b3df07f 100644
 --- a/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
 +++ b/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
-@@ -157,6 +157,11 @@ extern int debug_largebar;
+@@ -179,6 +179,11 @@ extern int debug_largebar;
   */
  extern int ignore_crat;
  
@@ -91,10 +94,10 @@ index 6727e9de5b8b..df23591399f6 100644
  extern int amdgpu_noretry;
  
 diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_topology.c b/drivers/gpu/drm/amd/amdkfd/kfd_topology.c
-index f185f6cbc05c..91cc6a80e952 100644
+index 3f0a4a415907..d2c52b279eab 100644
 --- a/drivers/gpu/drm/amd/amdkfd/kfd_topology.c
 +++ b/drivers/gpu/drm/amd/amdkfd/kfd_topology.c
-@@ -1015,7 +1015,15 @@ int kfd_topology_init(void)
+@@ -1081,7 +1081,15 @@ int kfd_topology_init(void)
  	 * NOTE: The current implementation expects all AMD APUs to have
  	 *	CRAT. If no CRAT is available, it is assumed to be a CPU
  	 */
@@ -111,7 +114,7 @@ index f185f6cbc05c..91cc6a80e952 100644
  	if (!ret) {
  		ret = kfd_parse_crat_table(crat_image,
  					   &temp_topology_device_list,
-@@ -1029,6 +1037,11 @@ int kfd_topology_init(void)
+@@ -1095,6 +1103,11 @@ int kfd_topology_init(void)
  		}
  	}
  
@@ -124,5 +127,5 @@ index f185f6cbc05c..91cc6a80e952 100644
  		ret = kfd_create_crat_image_virtual(&crat_image, &image_size,
  						    COMPUTE_UNIT_CPU, NULL,
 -- 
-2.29.2
+2.25.1
 

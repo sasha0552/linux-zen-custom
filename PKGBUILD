@@ -18,6 +18,8 @@ _srcname=zen-kernel
 source=(
   "$_srcname::git+https://github.com/zen-kernel/zen-kernel?signed#tag=$_srctag"
   config         # the main kernel config file
+  0001-add-kernel-message-on-kfd-suspend-resume.patch
+  0002-Allows-to-choose-iGPU-or-dGPU-memory-management-mode.patch
 )
 validpgpkeys=(
   'ABAF11C65A2970B130ABE3C479BE3E4300411886'  # Linus Torvalds
@@ -26,7 +28,9 @@ validpgpkeys=(
   'C5ADB4F3FEBBCE27A3E54D7D9AE4078033F8024D'  # Steven Barrett <steven@liquorix.net>
 )
 sha256sums=('SKIP'
-            'cc5e70dcc4c0cc475402635a819c81fbaaf78406f7eae32e2e368e851d82983d')
+            'cc5e70dcc4c0cc475402635a819c81fbaaf78406f7eae32e2e368e851d82983d'
+            'aefe948d6eb840870326b1f3624ee8c20d1b8ae83e2cff1301e3dd4702ba3d22'
+            'a8b9247a3c216c1468d0e3689b4d5127793dc1d718be8a4d8972c283b4080e3f')
 
 export KBUILD_BUILD_HOST=archlinux
 export KBUILD_BUILD_USER=$pkgbase

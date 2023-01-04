@@ -22,12 +22,16 @@ pkgbase = linux-zen-custom
 	options = !strip
 	source = zen-kernel::git+https://github.com/zen-kernel/zen-kernel?signed#tag=v6.1.2-zen1
 	source = config
+	source = 0001-add-kernel-message-on-kfd-suspend-resume.patch
+	source = 0002-Allows-to-choose-iGPU-or-dGPU-memory-management-mode.patch
 	validpgpkeys = ABAF11C65A2970B130ABE3C479BE3E4300411886
 	validpgpkeys = 647F28654894E3BD457199BE38DBBDC86092693E
 	validpgpkeys = A2FF3A36AAA56654109064AB19802F8B0D70FC30
 	validpgpkeys = C5ADB4F3FEBBCE27A3E54D7D9AE4078033F8024D
 	sha256sums = SKIP
 	sha256sums = cc5e70dcc4c0cc475402635a819c81fbaaf78406f7eae32e2e368e851d82983d
+	sha256sums = aefe948d6eb840870326b1f3624ee8c20d1b8ae83e2cff1301e3dd4702ba3d22
+	sha256sums = a8b9247a3c216c1468d0e3689b4d5127793dc1d718be8a4d8972c283b4080e3f
 
 pkgname = linux-zen-custom
 	pkgdesc = The Linux ZEN kernel and modules

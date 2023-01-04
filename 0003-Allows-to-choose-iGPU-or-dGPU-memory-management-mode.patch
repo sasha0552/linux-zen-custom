@@ -1,0 +1,128 @@
+From b221d51c6a6e9d7fb306fe94980aeac4f05c56c9 Mon Sep 17 00:00:00 2001
+From: Djip_007 <djip.perois@free.fr>
+Date: Tue, 27 Aug 2019 21:57:29 +0200
+Subject: [PATCH 3/3] Allows to choose iGPU or dGPU memory management mode
+
+---
+ drivers/gpu/drm/amd/amdkfd/kfd_device.c   | 40 +++++++++++++++++++++++
+ drivers/gpu/drm/amd/amdkfd/kfd_priv.h     |  5 +++
+ drivers/gpu/drm/amd/amdkfd/kfd_topology.c | 15 ++++++++-
+ 3 files changed, 59 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_device.c b/drivers/gpu/drm/amd/amdkfd/kfd_device.c
+index 9385b27b979b..5eae5f89a7ce 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_device.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_device.c
+@@ -20,6 +20,7 @@
+  * OTHER DEALINGS IN THE SOFTWARE.
+  */
+ 
++#include <linux/module.h>
+ #include <linux/bsearch.h>
+ #include <linux/pci.h>
+ #include <linux/slab.h>
+@@ -523,6 +524,17 @@ static const struct kfd_device_info *kfd_supported_devices[][2] = {
+ 	[CHIP_NAVY_FLOUNDER] = {&navy_flounder_device_info, &navy_flounder_device_info},
+ };
+ 
++/*
++ * now we can't mix iGPU (AMD APU) with dGPU...
++ * so allow the user to chose on APU+GPU hardware.
++ * By default if only iGPU or dGPU the one that exist is use. (like before)
++ * if both exist the first found is use... (in fact the APU is alway the first?)
++ * (best that no-one working...)
++ */
++int amdkfd_rocm_mode = ROCM_MODE_IGPU | ROCM_MODE_DGPU;
++module_param_named(rocm_mode, amdkfd_rocm_mode, int, 0444);
++MODULE_PARM_DESC(rocm_mode, "allows to choose the memory management model to use (1 = iGPU, 2 = dGPU, 3 = (default) keep the first one found)");
++
+ static int kfd_gtt_sa_init(struct kfd_dev *kfd, unsigned int buf_size,
+ 				unsigned int chunk_size);
+ static void kfd_gtt_sa_fini(struct kfd_dev *kfd);
+@@ -546,6 +558,34 @@ struct kfd_dev *kgd2kfd_probe(struct kgd_dev *kgd,
+ 	device_info = kfd_supported_devices[asic_type][vf];
+ 	f2g = kfd2kgd_funcs[asic_type];
+ 
++	if (device_info) {
++		// iGPU mode:
++		if ((amdkfd_rocm_mode & ROCM_MODE_IGPU) 
++            && (device_info->needs_iommu_device)) {
++			// iGPU memory model request => do not add anymore dGPU
++			amdkfd_rocm_mode = ROCM_MODE_IGPU;
++		} else
++		// dGPU mode:
++		if ((amdkfd_rocm_mode &  ROCM_MODE_DGPU)
++			&& (!device_info->needs_iommu_device)) {
++			// dGPU memory model request => do not add anymore iGPU
++			amdkfd_rocm_mode = ROCM_MODE_DGPU;
++		} else 
++		// return for device not usable with current memory management models
++		if (amdkfd_rocm_mode & ROCM_MODE_IGPU) {
++			dev_warn(kfd_device,
++				"skipped %s, don't support iGPU memory management models\n",
++				amdgpu_asic_name[asic_type]);
++			return NULL;
++		} else
++		if (amdkfd_rocm_mode & ROCM_MODE_DGPU) {
++			dev_warn(kfd_device,
++				"skipped %s, don't support dGPU memory management models\n",
++				amdgpu_asic_name[asic_type]);
++			return NULL;
++		}
++	}
++
+ 	if (!device_info || !f2g) {
+ 		dev_err(kfd_device, "%s %s not supported in kfd\n",
+ 			amdgpu_asic_name[asic_type], vf ? "VF" : "");
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_priv.h b/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
+index 6727e9de5b8b..df23591399f6 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_priv.h
+@@ -157,6 +157,11 @@ extern int debug_largebar;
+  */
+ extern int ignore_crat;
+ 
++/* allow to chose iGPU or dGPU memory managment */
++#define ROCM_MODE_IGPU 0x1
++#define ROCM_MODE_DGPU 0x2
++extern int amdkfd_rocm_mode;
++
+ /* Set sh_mem_config.retry_disable on GFX v9 */
+ extern int amdgpu_noretry;
+ 
+diff --git a/drivers/gpu/drm/amd/amdkfd/kfd_topology.c b/drivers/gpu/drm/amd/amdkfd/kfd_topology.c
+index f185f6cbc05c..91cc6a80e952 100644
+--- a/drivers/gpu/drm/amd/amdkfd/kfd_topology.c
++++ b/drivers/gpu/drm/amd/amdkfd/kfd_topology.c
+@@ -1015,7 +1015,15 @@ int kfd_topology_init(void)
+ 	 * NOTE: The current implementation expects all AMD APUs to have
+ 	 *	CRAT. If no CRAT is available, it is assumed to be a CPU
+ 	 */
+-	ret = kfd_create_crat_image_acpi(&crat_image, &image_size);
++	// use acpi only if igpu is allowed...
++	if (amdkfd_rocm_mode & ROCM_MODE_IGPU) {
++		ret = kfd_create_crat_image_acpi(&crat_image, &image_size);
++	} else {
++		dev_info(kfd_device, "Ignoring ACPI CRAT on disabled iGPU (rocm_mode!=ROCM_MODE_IGPU)\n");
++		crat_image = NULL;
++		ret = -ENODATA;
++	}
++
+ 	if (!ret) {
+ 		ret = kfd_parse_crat_table(crat_image,
+ 					   &temp_topology_device_list,
+@@ -1029,6 +1037,11 @@ int kfd_topology_init(void)
+ 		}
+ 	}
+ 
++	if (crat_image) {
++		// APU enable force iGPU memory management model
++		amdkfd_rocm_mode = ROCM_MODE_IGPU;
++	}
++
+ 	if (!crat_image) {
+ 		ret = kfd_create_crat_image_virtual(&crat_image, &image_size,
+ 						    COMPUTE_UNIT_CPU, NULL,
+-- 
+2.29.2
+
